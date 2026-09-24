@@ -15,14 +15,35 @@ struct OnboardingView: View {
     @StateObject private var locationService = LocationService()
     @StateObject private var mapModel = RegionalCenterMapViewModel()
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     @State private var currentStep = 0
     @State private var zipCode = ""
-    @State private var selectedAgeGroup: String?
+    @State private var selectedAgeGroups: Set<String> = []
+    @State private var hasMultipleChildren = false
     @State private var selectedStage: JourneyStage?
+    @State private var selectedDiagnoses: [String] = []
     @State private var selectedAudienceType = "family"
     @State private var userRegionalCenter: RegionalCenterMatcher.RegionalCenterInfo?
 
-    private let totalSteps = 5
+    private let totalSteps = 7
+
+    /// Step-change animation; settles to a short ease-out under Reduce Motion
+    private var stepAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.2) : .spring(response: 0.4, dampingFraction: 0.8)
+    }
+
+    /// Steps keep their fixed, centered layout at standard type sizes; at
+    /// accessibility sizes the content scrolls so text never truncates.
+    @ViewBuilder
+    private func stepContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            ScrollView(showsIndicators: false) { content() }
+        } else {
+            content()
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,8 +54,10 @@ struct OnboardingView: View {
                 welcomeStep.tag(0)
                 locationStep.tag(1)
                 matchedStep.tag(2)
-                journeyStep.tag(3)
-                ageGroupStep.tag(4)
+                howToStep.tag(3)
+                journeyStep.tag(4)
+                diagnosisStep.tag(5)
+                ageGroupStep.tag(6)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .animation(.easeInOut, value: currentStep)
@@ -68,7 +91,7 @@ struct OnboardingView: View {
                 Capsule()
                     .fill(step == currentStep ? Theme.indigo : Theme.indigo.opacity(0.18))
                     .frame(width: step == currentStep ? 22 : 7, height: 7)
-                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: currentStep)
+                    .animation(stepAnimation, value: currentStep)
             }
         }
     }
@@ -79,7 +102,7 @@ struct OnboardingView: View {
         HStack(spacing: 16) {
             if currentStep > 0 {
                 Button {
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    withAnimation(stepAnimation) {
                         currentStep -= 1
                     }
                 } label: {
@@ -90,7 +113,7 @@ struct OnboardingView: View {
                         .padding(.vertical, 13)
                         .background(.ultraThinMaterial, in: Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
             }
 
             Spacer()
@@ -99,7 +122,7 @@ struct OnboardingView: View {
                 if currentStep == totalSteps - 1 {
                     completeOnboarding()
                 } else {
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    withAnimation(stepAnimation) {
                         currentStep += 1
                     }
                 }
@@ -119,7 +142,7 @@ struct OnboardingView: View {
                 }
                 .shadow(color: canProceed ? Theme.indigo.opacity(0.35) : .clear, radius: 12, y: 6)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable)
             .disabled(!canProceed)
             .animation(.easeOut(duration: 0.2), value: canProceed)
         }
@@ -128,6 +151,7 @@ struct OnboardingView: View {
     // MARK: - Step 0: Welcome
 
     private var welcomeStep: some View {
+        stepContainer {
         VStack(spacing: 22) {
             Spacer()
 
@@ -154,6 +178,13 @@ struct OnboardingView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 36)
 
+            Text("KiNDD does not keep your medical information. This is a navigation tool, not official medical advice.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 36)
+                .padding(.top, 4)
+
             VStack(alignment: .leading, spacing: 10) {
                 Text("I'm here as a")
                     .font(.caption.weight(.semibold))
@@ -172,11 +203,13 @@ struct OnboardingView: View {
             Spacer()
         }
         .padding()
+        }
     }
 
     // MARK: - Step 1: ZIP
 
     private var locationStep: some View {
+        stepContainer {
         VStack(spacing: 22) {
             Spacer()
 
@@ -219,7 +252,7 @@ struct OnboardingView: View {
                         .font(.subheadline.weight(.medium))
                         .foregroundColor(Theme.indigo)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
             } else if locationService.hasLocationPermission && locationService.isLoading {
                 ProgressView()
             }
@@ -237,12 +270,14 @@ struct OnboardingView: View {
                 }
             }
         }
+        }
     }
 
     // MARK: - Step 2: The matched moment
 
     @ViewBuilder
     private var matchedStep: some View {
+        stepContainer {
         if let rc = userRegionalCenter {
             VStack(spacing: 0) {
                 Spacer(minLength: 12)
@@ -284,6 +319,7 @@ struct OnboardingView: View {
                 Spacer()
             }
             .padding()
+        }
         }
     }
 
@@ -367,9 +403,18 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Step 3: Journey stage
+    // MARK: - Step 3: How to use KiNDD
+
+    private var howToStep: some View {
+        stepContainer {
+            HowToGuideContent()
+        }
+    }
+
+    // MARK: - Step 4: Journey stage
 
     private var journeyStep: some View {
+        stepContainer {
         VStack(spacing: 22) {
             Spacer(minLength: 8)
 
@@ -380,7 +425,7 @@ struct OnboardingView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
 
-            Text("KiNDD uses this to suggest your next step - nothing is locked in.")
+            Text("Optional - KiNDD uses this to suggest a next step. Nothing is locked in.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -402,32 +447,40 @@ struct OnboardingView: View {
             Spacer()
         }
         .padding()
+        }
     }
 
-    // MARK: - Step 4: Age group
+    // MARK: - Step 5: Diagnoses
 
-    private var ageGroupStep: some View {
+    private var diagnosisStep: some View {
+        stepContainer {
         VStack(spacing: 22) {
             Spacer(minLength: 8)
 
-            stepIcon("figure.and.child.holdinghands", tint: Theme.pink)
+            stepIcon("heart.text.square", tint: Theme.purple)
 
-            Text("How old is your child?")
+            Text("Any diagnoses you're navigating?")
                 .font(.system(.title, design: .rounded).weight(.bold))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
 
-            Text("Optional - it helps us show age-appropriate services first.")
+            Text("Optional - pick any that apply. We'll highlight providers who treat them.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 36)
 
             VStack(spacing: 10) {
-                ForEach(SearchFilters.ageGroups, id: \.self) { age in
+                ForEach(SearchFilters.diagnoses, id: \.self) { diagnosis in
                     SelectionButton(
-                        title: ageGroupDisplayName(age),
-                        isSelected: selectedAgeGroup == age
+                        title: diagnosis,
+                        isSelected: selectedDiagnoses.contains(diagnosis)
                     ) {
-                        selectedAgeGroup = selectedAgeGroup == age ? nil : age
+                        if let index = selectedDiagnoses.firstIndex(of: diagnosis) {
+                            selectedDiagnoses.remove(at: index)
+                        } else {
+                            selectedDiagnoses.append(diagnosis)
+                        }
                     }
                 }
             }
@@ -436,6 +489,60 @@ struct OnboardingView: View {
             Spacer()
         }
         .padding()
+        }
+    }
+
+    // MARK: - Step 6: Age group
+
+    private var ageGroupStep: some View {
+        stepContainer {
+        VStack(spacing: 22) {
+            Spacer(minLength: 8)
+
+            stepIcon("figure.and.child.holdinghands", tint: Theme.pink)
+
+            Text(hasMultipleChildren || selectedAgeGroups.count > 1
+                 ? "How old are your children?"
+                 : "How old is your child?")
+                .font(.system(.title, design: .rounded).weight(.bold))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+
+            Text("Optional - pick every age that applies. You can switch between kids later in Filters.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 36)
+
+            VStack(spacing: 10) {
+                ForEach(SearchFilters.onboardingAgeGroups, id: \.self) { age in
+                    SelectionButton(
+                        title: ageGroupDisplayName(age),
+                        isSelected: selectedAgeGroups.contains(age)
+                    ) {
+                        toggleAge(age)
+                    }
+                }
+
+                SelectionButton(
+                    title: "I have more than 1 child",
+                    icon: "person.2.fill",
+                    isSelected: hasMultipleChildren || selectedAgeGroups.count > 1
+                ) {
+                    hasMultipleChildren.toggle()
+                    if !hasMultipleChildren && selectedAgeGroups.count > 1 {
+                        if let first = selectedAgeGroups.sorted().first {
+                            selectedAgeGroups = [first]
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 24)
+
+            Spacer()
+        }
+        .padding()
+        }
     }
 
     // MARK: - Shared bits
@@ -462,15 +569,34 @@ struct OnboardingView: View {
         switch currentStep {
         case 1:
             return zipCode.count == 5 && zipCode.allSatisfy { $0.isNumber }
-        case 3:
-            return selectedStage != nil
         default:
             return true
         }
     }
 
+    private func toggleAge(_ age: String) {
+        if selectedAgeGroups.contains(age) {
+            selectedAgeGroups.remove(age)
+        } else {
+            selectedAgeGroups.insert(age)
+        }
+        if selectedAgeGroups.count > 1 {
+            hasMultipleChildren = true
+        }
+    }
+
     private func completeOnboarding() {
-        appState.searchFilters.ageGroup = selectedAgeGroup
+        let ages = SearchFilters.onboardingAgeGroups.filter { selectedAgeGroups.contains($0) }
+        appState.saveChildAges(ages, hasMultiple: hasMultipleChildren)
+        // Filter pipeline is single-valued (?diagnosis= on the API); first pick
+        // is the primary. All picks land in UserMemory for chat context.
+        appState.searchFilters.diagnosis = selectedDiagnoses.first(where: { $0 != "Other" })
+        if !selectedDiagnoses.isEmpty {
+            let memory = UserMemory()
+            for diagnosis in selectedDiagnoses where diagnosis != "Other" {
+                memory.addDiagnosis(diagnosis)
+            }
+        }
         appState.saveUserContext(
             zipCode: zipCode,
             audienceType: selectedAudienceType,
@@ -481,10 +607,10 @@ struct OnboardingView: View {
             appState.saveJourneyStage(stage)
         }
 
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        Haptics.action()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+            withAnimation(stepAnimation) {
                 appState.completeOnboarding()
             }
         }
@@ -499,6 +625,95 @@ struct OnboardingView: View {
         case "All Ages": return "All Ages"
         default: return age
         }
+    }
+}
+
+// MARK: - How-to guide (onboarding step + Settings)
+
+struct HowToGuideContent: View {
+    var body: some View {
+        VStack(spacing: 22) {
+            Spacer(minLength: 8)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Theme.indigo.opacity(0.13))
+                    .frame(width: 64, height: 64)
+
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundColor(Theme.indigo)
+            }
+
+            Text("Optional questions, then Filters")
+                .font(.system(.title, design: .rounded).weight(.bold))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+
+            Text("Next we'll ask a few optional questions about your family. Skip anything you don't want to answer.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 36)
+
+            VStack(alignment: .leading, spacing: 12) {
+                howToRow(
+                    icon: "slider.horizontal.3",
+                    title: "Filters stay on the map",
+                    detail: "Use Filters to narrow results, reset your search, or switch which child's age is applied."
+                )
+                howToRow(
+                    icon: "person.2.fill",
+                    title: "More than one child",
+                    detail: "Select every age that applies. Later, tap a child's age chip to toggle between kids."
+                )
+                howToRow(
+                    icon: "lock.shield",
+                    title: "Your information stays with you",
+                    detail: "KiNDD does not keep medical records. This is a navigation tool, not official medical advice or a diagnosis."
+                )
+            }
+            .padding(16)
+            .background {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Theme.cardSurface)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+            }
+            .padding(.horizontal, 24)
+
+            Spacer()
+        }
+        .padding()
+    }
+
+    private func howToRow(icon: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(Theme.indigo)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+struct HowToGuideView: View {
+    var body: some View {
+        ScrollView {
+            HowToGuideContent()
+        }
+        .background(Theme.canvas.ignoresSafeArea())
+        .navigationTitle("How to use KiNDD")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -540,7 +755,7 @@ struct SelectionButton: View {
                     .stroke(isSelected ? Theme.indigo.opacity(0.6) : Color.clear, lineWidth: 1.5)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressableCard)
     }
 }
 

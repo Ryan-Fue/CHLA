@@ -10,6 +10,7 @@ import CoreLocation
 
 struct ProviderListView: View {
     @EnvironmentObject var appState: AppState
+    @StateObject private var userMemory = UserMemory()
     @StateObject private var providerStore = ProviderStore()
     @StateObject private var locationService = LocationService()
     @ObservedObject var visibilityManager = UIVisibilityManager.shared
@@ -20,6 +21,7 @@ struct ProviderListView: View {
     @State private var searchScope: SearchScope = .all
     @State private var searchSuggestions: [String] = []
     @State private var selectedProvider: Provider?
+    @State private var hasLoadedOnce = false
 
     enum SortOption: String, CaseIterable {
         case distance = "Distance"
@@ -35,7 +37,11 @@ struct ProviderListView: View {
                 provider.name.localizedCaseInsensitiveContains(searchText) ||
                 (provider.type?.localizedCaseInsensitiveContains(searchText) ?? false) ||
                 provider.address.localizedCaseInsensitiveContains(searchText) ||
-                (provider.therapyTypes?.contains { $0.localizedCaseInsensitiveContains(searchText) } ?? false)
+                (provider.therapyTypes?.contains { $0.localizedCaseInsensitiveContains(searchText) } ?? false) ||
+                (provider.diagnosesTreated?.contains {
+                    $0.localizedCaseInsensitiveContains(searchText) ||
+                    shortDiagnosisLabel($0).localizedCaseInsensitiveContains(searchText)
+                } ?? false)
             }
         }
 
@@ -60,19 +66,24 @@ struct ProviderListView: View {
     private var currentSuggestions: [String] {
         guard !searchText.isEmpty else { return [] }
 
+        let diagnosisSuggestions = SearchFilters.diagnoses
+            .filter { $0 != "Other" }
+            .map { shortDiagnosisLabel($0) }
+            .filter { $0.localizedCaseInsensitiveContains(searchText) }
+
         // Generate suggestions from provider names
         let providerSuggestions = providerStore.providers
             .map { $0.name }
             .filter { $0.localizedCaseInsensitiveContains(searchText) }
             .prefix(5)
 
-        return Array(providerSuggestions)
+        return diagnosisSuggestions + Array(providerSuggestions)
     }
 
     var body: some View {
         NavigationStack {
             Group {
-                if providerStore.isLoading {
+                if providerStore.providers.isEmpty && (providerStore.isLoading || !hasLoadedOnce) {
                     loadingView
                 } else if providerStore.providers.isEmpty {
                     emptyView
@@ -80,6 +91,11 @@ struct ProviderListView: View {
                     providerList
                 }
             }
+            // Fill the screen so the page background below paints edge-to-edge
+            // even when the visible branch has a small intrinsic size.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(.easeOut(duration: 0.2), value: providerStore.isLoading)
+            .animation(.easeOut(duration: 0.2), value: providerStore.providers.isEmpty)
             .background {
                 ZStack(alignment: .top) {
                     Color(.systemGroupedBackground)
@@ -151,17 +167,20 @@ struct ProviderListView: View {
                     Button {
                         showFilters = true
                     } label: {
-                        ZStack(alignment: .topTrailing) {
-                        Image(systemName: "slider.horizontal.3")
-
+                        HStack(spacing: 4) {
+                            Image(systemName: "slider.horizontal.3")
+                            Text("Filters")
                             if activeFilterCount > 0 {
-                                Circle()
-                                    .fill(Color.accentBlue)
-                                    .frame(width: 8, height: 8)
-                                    .offset(x: 2, y: -2)
+                                Text("\(activeFilterCount)")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.accentBlue, in: Capsule())
                             }
                         }
                     }
+                    .accessibilityLabel("Filters")
                 }
             }
             .sheet(isPresented: $showFilters) {
@@ -226,6 +245,19 @@ struct ProviderListView: View {
         return count
     }
 
+    /// First user diagnosis (active filter, then remembered ones) this provider treats.
+    private func matchedDiagnosis(for provider: Provider) -> String? {
+        var selected: [String] = []
+        if let dx = appState.searchFilters.diagnosis { selected.append(dx) }
+        for dx in userMemory.context.diagnoses where !selected.contains(dx) {
+            selected.append(dx)
+        }
+        guard !selected.isEmpty, let treated = provider.diagnosesTreated else { return nil }
+        return selected.first { dx in
+            treated.contains { $0.caseInsensitiveCompare(dx) == .orderedSame }
+        }
+    }
+
     private func searchWithCurrentFilters() async {
         var filters = appState.searchFilters
 
@@ -248,12 +280,18 @@ struct ProviderListView: View {
     // MARK: - Subviews
 
     private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-                .scaleEffect(1.5)
-            Text(L10n.Resources.loading)
-                .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(spacing: 16) {
+                ForEach(0..<5, id: \.self) { _ in
+                    ProviderCardSkeleton()
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
         }
+        .scrollDisabled(true)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(L10n.Resources.loading)
     }
 
     private var emptyView: some View {
@@ -279,7 +317,10 @@ struct ProviderListView: View {
                 Button {
                     selectedProvider = provider
                 } label: {
-                    ProviderCardView(provider: provider)
+                    ProviderCardView(
+                        provider: provider,
+                        matchedDiagnosis: matchedDiagnosis(for: provider)
+                    )
                 }
                 .buttonStyle(.plain)
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
@@ -297,6 +338,32 @@ struct ProviderListView: View {
 
     private var resultsHeader: some View {
         VStack(spacing: 8) {
+            if !appState.childAgeGroups.isEmpty || activeFilterCount > 0 {
+                FamilyFilterBar(
+                    filters: appState.searchFilters,
+                    childAgeGroups: appState.childAgeGroups,
+                    onOpenFilters: { showFilters = true },
+                    onClearAll: clearFilters,
+                    onSelectChildAge: { age in
+                        appState.selectChildAge(age)
+                        Task { await refreshProviders() }
+                    },
+                    onRemove: { type in
+                        switch type {
+                        case .ageGroup:
+                            appState.searchFilters.ageGroup = nil
+                        case .diagnosis:
+                            appState.searchFilters.diagnosis = nil
+                        case .insurance:
+                            appState.searchFilters.insurance = nil
+                        case .therapy(let therapy):
+                            appState.searchFilters.therapyTypes.removeAll { $0 == therapy }
+                        }
+                        Task { await refreshProviders() }
+                    }
+                )
+            }
+
             HStack {
                 Text(L10n.Resources.found(filteredProviders.count))
                     .font(.subheadline)
@@ -389,6 +456,7 @@ struct ProviderListView: View {
                 location: coordinate,
                 filters: appState.searchFilters
             )
+        hasLoadedOnce = true
     }
 
     private func refreshProviders() async {
@@ -401,12 +469,21 @@ struct ProviderListView: View {
                 filters: appState.searchFilters
             )
     }
+
+    private func clearFilters() {
+        appState.searchFilters.ageGroup = nil
+        appState.searchFilters.diagnosis = nil
+        appState.searchFilters.insurance = nil
+        appState.searchFilters.therapyTypes = []
+        Task { await refreshProviders() }
+    }
 }
 
 // MARK: - Provider Card View (Liquid Glass Style)
 
 struct ProviderCardView: View {
     let provider: Provider
+    var matchedDiagnosis: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -431,6 +508,22 @@ struct ProviderCardView: View {
                                     .stroke(Color.accentBlue.opacity(0.2), lineWidth: 0.5)
                             }
                             .foregroundColor(.accentBlue)
+                    }
+
+                    if let matched = matchedDiagnosis {
+                        Label("Treats \(shortDiagnosisLabel(matched))", systemImage: "checkmark.seal.fill")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background {
+                                Capsule()
+                                    .fill(Theme.purple.opacity(0.12))
+                                Capsule()
+                                    .stroke(Theme.purple.opacity(0.2), lineWidth: 0.5)
+                            }
+                            .foregroundColor(Theme.purple)
+                            .accessibilityLabel("Treats \(matched)")
                     }
                 }
 
@@ -551,6 +644,81 @@ struct ProviderCardView: View {
         therapy
             .replacingOccurrences(of: " therapy", with: "")
             .replacingOccurrences(of: "Parent child interaction therapy/parent training behavior management", with: "Parent Training")
+    }
+}
+
+fileprivate func shortDiagnosisLabel(_ diagnosis: String) -> String {
+    let short: [String: String] = [
+        "Autism Spectrum Disorder": "Autism",
+        "Global Development Delay": "Dev Delay",
+        "Sensory Processing Disorder": "Sensory",
+        "Speech and Language Disorder": "Speech"
+    ]
+    return short[diagnosis] ?? diagnosis
+}
+
+// MARK: - Provider Card Skeleton (loading placeholder)
+
+private struct ProviderCardSkeleton: View {
+    @State private var pulsing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 8) {
+                    RoundedRectangle(cornerRadius: 6)
+                        .frame(width: 190, height: 16)
+                    Capsule()
+                        .frame(width: 96, height: 22)
+                }
+
+                Spacer()
+
+                RoundedRectangle(cornerRadius: 12)
+                    .frame(width: 48, height: 54)
+            }
+
+            RoundedRectangle(cornerRadius: 6)
+                .frame(width: 225, height: 12)
+
+            HStack(spacing: 6) {
+                Capsule().frame(width: 68, height: 24)
+                Capsule().frame(width: 88, height: 24)
+                Capsule().frame(width: 56, height: 24)
+            }
+
+            HStack {
+                RoundedRectangle(cornerRadius: 6)
+                    .frame(width: 130, height: 12)
+                Spacer()
+                Capsule().frame(width: 64, height: 20)
+            }
+        }
+        .foregroundStyle(Color(.systemFill))
+        .opacity(pulsing ? 0.45 : 1)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.secondarySystemGroupedBackground))
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(
+                    LinearGradient(
+                        colors: [.white.opacity(0.3), .black.opacity(0.05)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.5
+                )
+        }
+        .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                pulsing = true
+            }
+        }
     }
 }
 

@@ -12,8 +12,9 @@
 #      (or pass as arguments: ./release.sh <KEYID> <ISSUER_ID>)
 #
 # VERSIONING: the marketing version must EXCEED every version already
-# uploaded to App Store Connect (history includes 1.3.0). Check the
-# Organizer archive list or App Store Connect before bumping. Version
+# uploaded to App Store Connect (history through 1.4.0 build 2, submitted
+# 2026-07-08), and the build number must exceed every build already
+# uploaded for the same version. Check App Store Connect before bumping. Version
 # lives in CHLA-iOS/Resources/Info.plist (CFBundleShortVersionString /
 # CFBundleVersion) AND in project.pbxproj (MARKETING_VERSION /
 # CURRENT_PROJECT_VERSION for the widget) - keep all targets aligned.
@@ -76,3 +77,46 @@ xcrun altool --upload-app -f "$EXPORT_DIR"/*.ipa -t ios \
     --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
 
 echo "== Uploaded KiNDD $VERSION ($BUILD). Processing takes 5-15 min in App Store Connect."
+
+# Broadcast the upload to the KiNDD Slack. Token comes from SLACK_BOT_TOKEN,
+# falling back to the bot token stored in ~/.claude.json. Failure to notify
+# never fails the release.
+SLACK_CHANNEL="${KINDD_SLACK_CHANNEL:-#general}"
+SLACK_TOKEN="${SLACK_BOT_TOKEN:-$(python3 - <<'PY' 2>/dev/null
+import json, os
+path = os.path.expanduser("~/.claude.json")
+proj = "/Users/alexbeattie/Library/CloudStorage/GoogleDrive-alex@kinddhelp.org/My Drive"
+try:
+    print(json.load(open(path))["projects"][proj]["mcpServers"]["slack"]["env"]["SLACK_BOT_TOKEN"])
+except Exception:
+    pass
+PY
+)}"
+if [ -n "$SLACK_TOKEN" ]; then
+    SLACK_TEXT="KiNDD $VERSION ($BUILD) uploaded to TestFlight. Processing takes 5-15 min, then it appears for internal testers; external testers follow beta review."
+    curl -s -X POST "https://slack.com/api/chat.postMessage" \
+        -H "Authorization: Bearer $SLACK_TOKEN" \
+        -H "Content-Type: application/json; charset=utf-8" \
+        -d "{\"channel\": \"$SLACK_CHANNEL\", \"text\": \"$SLACK_TEXT\"}" \
+        | grep -q '"ok":true' \
+        && echo "== Slack notified ($SLACK_CHANNEL)" \
+        || echo "== Slack notify failed (check bot is in $SLACK_CHANNEL)"
+else
+    echo "== Slack notify skipped (no bot token found)"
+fi
+
+# Pin the upload to an annotated git tag (vVERSION) when the tree is clean.
+# A dirty tree means the tag would not describe the archived source - skip.
+if [ -z "$(git status --porcelain 2>/dev/null)" ]; then
+    TAG="v$VERSION"
+    if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+        echo "== Tag $TAG already exists; leaving it in place"
+    else
+        git tag -a "$TAG" -m "KiNDD iOS $VERSION ($BUILD) uploaded to App Store Connect"
+        git push -q origin "$TAG" \
+            && echo "== Tagged $TAG and pushed" \
+            || echo "== Tagged $TAG locally; push failed"
+    fi
+else
+    echo "== Git tag skipped (working tree dirty)"
+fi

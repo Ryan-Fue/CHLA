@@ -1,19 +1,31 @@
 # App Store Connect Metadata
 
+## Current Status (updated 2026-09-01)
+
+1.4.3 build 1 is the how-to / multi-child / insurance-bucket onboarding release. Upload via `scripts/release.sh`, then attach the build in App Store Connect and submit for review. Live store version remains 1.4.0 until that review lands.
+
+| Item            | Value                                                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Live version    | 1.4.0 build 2 - approved and Ready for Sale 2026-07-10 (submitted 2026-07-08; rejected 2026-07-09 under Guideline 2.3.6 for the Age Rating; fixed via API and resubmitted the same morning) |
+| Age rating note | Medical Treatment Information: Frequent (required by App Review for medical content; may raise age rating from 4+ to 12+). Do not downgrade in future versions.                             |
+| Release type    | Automatic after approval                                                                                                                                                                    |
+| Device family   | iPhone only (iPad removed in 1.4.0; store previously required iPad screenshots)                                                                                                             |
+| Upload path     | `scripts/release.sh` (archives, exports, uploads via App Store Connect API key)                                                                                                             |
+
 ## Basic Information
 
 
-| Field | Value |
+| Field                | Value                          |
 | -------------------- | ------------------------------ |
-| App Name | KiNDD Resources |
-| Subtitle | Find Regional Center Resources |
-| Bundle ID | com.nddresources.map |
-| SKU | ndd-resource-map-001 |
-| Primary Language | English (U.S.) |
-| Category (Primary) | Medical |
-| Category (Secondary) | Navigation |
-| Age Rating | 4+ |
-| Copyright | © 2025 NDD Resources |
+| App Name             | KiNDD Resources                |
+| Subtitle             | Find Regional Center Resources |
+| Bundle ID            | com.nddresources.map           |
+| SKU                  | ndd-resource-map-001           |
+| Primary Language     | English (U.S.)                 |
+| Category (Primary)   | Medical                        |
+| Category (Secondary) | Navigation                     |
+| Age Rating           | 4+                             |
+| Copyright            | © 2025 NDD Resources           |
 
 
 ## Subtitle (30 characters max)
@@ -75,12 +87,12 @@ regional center,autism,ABA,speech therapy,developmental,disability,early interve
 ## URLs
 
 
-| Field | URL |
+| Field            | URL                                                            |
 | ---------------- | -------------------------------------------------------------- |
-| Privacy Policy | [https://kinddhelp.com/privacy](https://kinddhelp.com/privacy) |
-| Terms of Service | [https://kinddhelp.com/terms](https://kinddhelp.com/terms) |
-| Support URL | [https://kinddhelp.com/about](https://kinddhelp.com/about) |
-| Marketing URL | [https://kinddhelp.com](https://kinddhelp.com) |
+| Privacy Policy   | [https://kinddhelp.com/privacy](https://kinddhelp.com/privacy) |
+| Terms of Service | [https://kinddhelp.com/terms](https://kinddhelp.com/terms)     |
+| Support URL      | [https://kinddhelp.com/about](https://kinddhelp.com/about)     |
+| Marketing URL    | [https://kinddhelp.com](https://kinddhelp.com)                 |
 
 
 ## App Review Information
@@ -105,11 +117,33 @@ Location permission is optional; every feature works by entering a ZIP code inst
 ## Version Information
 
 
-| Field | Value |
-| ---------- | --------------- |
-| Version | 1.4.0 |
-| Build | 1 |
+| Field   | Value                                                                                                                                                                                      |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Version | 1.4.0                                                                                                                                                                                      |
+| Build   | 2 (build 1, uploaded 2026-07-07, included iPad in the device family, and review submission was blocked on missing iPad Pro screenshots; build 2 is iPhone-only and is the submitted build) |
 
+
+## What's New - 1.4.3 (paste into App Store Connect)
+
+```
+After your Regional Center match, KiNDD now explains optional questions and how Filters work.
+
+- Multi-select ages, plus I have more than 1 child
+- Insurance: Medi-Cal, Private Insurance, or Private Pay
+- Filters and Reset stay visible on the map, with a kid toggle when you saved more than one age
+- How to use KiNDD in Settings
+- Clear note that KiNDD does not keep medical information and is a navigation tool, not official medical advice
+```
+
+## What to Test - 1.4.3 (paste into TestFlight)
+
+```
+1. Fresh onboarding (More -> Restart Welcome Setup): after Regional Center, you should see the how-to step, then optional journey/diagnosis/age. Age can pick more than one, plus I have more than 1 child.
+2. Map: Filters and Reset in the bar. If you picked two ages, tap the kid chips and confirm the list/map change.
+3. Filters sheet: insurance is three buckets. Disclaimer is on the sheet, About, and FAQ.
+4. Settings -> How to use KiNDD.
+5. First visit after onboarding: the Filters coach tip, then it stays gone.
+```
 
 ## What's New - 1.4.0 (paste into App Store Connect)
 
@@ -129,6 +163,17 @@ IMPROVED
 - Smoother chat with clearer, better-formatted answers
 - Faster onboarding: enter your ZIP, see your regional center matched on the map, and you're in
 - Better support for VoiceOver and Dynamic Type
+```
+
+## What to Test - 1.4.1 (paste into TestFlight)
+
+```
+This is a polish build for beta testers - no new features, better feel.
+1. Tap around: buttons, cards, chips, and tab items should visibly press down and give light haptic feedback
+2. FAQ rows, chat suggestion chips, and provider cards: press feedback everywhere
+3. In chat, tap + to attach: the source menu now opens from the + button
+4. Settings -> Accessibility -> Motion -> Reduce Motion ON: onboarding, tab switches, map moves, and the typing indicator should use gentle fades instead of springs and pulses
+5. Settings -> Accessibility -> Display & Text Size -> Larger Text (drag to a large size): Home, chat input, FAQ, and provider screens should stay readable without clipped text; long-press the tab bar icons to see the large content viewer
 ```
 
 ## What to Test - 1.4.0 (paste into TestFlight)
