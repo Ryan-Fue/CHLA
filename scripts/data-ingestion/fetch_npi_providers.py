@@ -138,7 +138,7 @@ def flatten(record, source_url, fetched_at):
         "longitude": "",
         "phone": normalize_phone(location.get("telephone_number")),
         "website": "",
-        "therapy_types": primary_taxonomy.get("desc", ""),
+        "therapy_types": (primary_taxonomy.get("desc") or "").strip().rstrip(",").strip(),
         "insurance_accepted": "",
         "diagnoses_treated": "",
         "age_groups": "",
@@ -151,6 +151,27 @@ def flatten(record, source_url, fetched_at):
         "source_url": source_url,
         "fetched_at": fetched_at,
     }
+
+
+def is_taxonomy_match(target_tax, row_tax):
+    clean_row = (row_tax or "").strip().rstrip(",").strip()
+    clean_target = (target_tax or "").strip().rstrip(",").strip()
+
+    if not clean_row or not clean_target:
+        return False
+    if clean_row == clean_target:
+        return True
+
+    norm_row = re.sub(r"[^a-z0-9]+", " ", clean_row.lower()).strip()
+    norm_target = re.sub(r"[^a-z0-9]+", " ", clean_target.lower()).strip()
+
+    if norm_row == norm_target:
+        return True
+    if norm_row.startswith(norm_target + " "):
+        return True
+    if norm_target in norm_row or norm_row in norm_target:
+        return True
+    return False
 
 
 def fetch_segment(session, taxonomy, city, state, cache_dir, rate_limit_seconds, postal_code=None):
@@ -184,6 +205,7 @@ def main():
     load_env()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--taxonomy", required=True, help='e.g. "Behavior Analyst"')
+    parser.add_argument("--query-taxonomy", help="API query taxonomy string if different from --taxonomy")
     parser.add_argument("--city", action="append", default=[], help="Repeatable; segments the query")
     parser.add_argument("--county-zips",
                         default=str(Path(__file__).resolve().parent / "la_county_zips.csv"),
@@ -215,6 +237,8 @@ def main():
     skipped_outside = 0
     skipped_taxonomy = Counter()
 
+    query_tax = args.query_taxonomy or args.taxonomy
+
     if args.city:
         segments = [(c, None) for c in args.city]
     else:
@@ -222,15 +246,15 @@ def main():
 
     for i, (city, postal_code) in enumerate(segments, 1):
         geo = city or postal_code or "all"
-        print(f"[{i}/{len(segments)}] Fetching taxonomy={args.taxonomy!r} {geo} state={args.state}")
+        print(f"[{i}/{len(segments)}] Fetching taxonomy={query_tax!r} {geo} state={args.state}")
         records, truncated = fetch_segment(
-            session, args.taxonomy, city, args.state, cache_dir, args.rate_limit,
+            session, query_tax, city, args.state, cache_dir, args.rate_limit,
             postal_code=postal_code,
         )
         if truncated:
             truncated_segments.append(geo)
         source_url = (
-            f"{API_URL}?version={API_VERSION}&taxonomy_description={args.taxonomy}"
+            f"{API_URL}?version={API_VERSION}&taxonomy_description={query_tax}"
             f"&state={args.state}"
             + (f"&city={city}" if city else "")
             + (f"&postal_code={postal_code}" if postal_code else "")
@@ -242,7 +266,7 @@ def main():
             if practice_zip not in county_zips:
                 skipped_outside += 1
                 continue
-            if row["therapy_types"] != args.taxonomy:
+            if not is_taxonomy_match(args.taxonomy, row["therapy_types"]):
                 skipped_taxonomy[row["therapy_types"]] += 1
                 continue
             rows[row["npi"]] = row
