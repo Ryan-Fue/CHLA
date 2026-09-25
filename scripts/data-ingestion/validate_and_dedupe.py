@@ -25,7 +25,7 @@ def normalize_phone_digits(raw):
     return digits if len(digits) == 10 else ""
 
 
-def load_existing_providers(export_path="../../providers_complete_export.csv"):
+def load_existing_providers(export_path="../../providers_complete_export.csv", target_file=None):
     """Load existing providers for cross-file dedup.
 
     Returns (npi_set, name_phone_set, name_only_set).
@@ -35,6 +35,9 @@ def load_existing_providers(export_path="../../providers_complete_export.csv"):
         export_file = Path("providers_complete_export.csv")
     if not export_file.is_file():
         print(f"Notice: {export_path} not found. Skipping cross-file deduplication.", file=sys.stderr)
+        return set(), set(), set()
+
+    if target_file and (target_file.name == export_file.name or target_file.resolve() == export_file.resolve()):
         return set(), set(), set()
 
     npis = set()
@@ -71,7 +74,7 @@ def main():
         rows = list(reader)
 
     total_pulled = len(rows)
-    existing_npis, existing_name_phone, existing_names = load_existing_providers()
+    existing_npis, existing_name_phone, existing_names = load_existing_providers(target_file=target_file)
 
     already_in_db = 0
     final_rows = []
@@ -139,11 +142,15 @@ def main():
 
     fetched_date = final_rows[0].get("fetched_at", "")[:10] if final_rows else ""
 
+    if target_file.name == "providers_complete_export.csv":
+        taxonomy_label = "All Taxonomies Combined"
+    else:
+        taxonomy_label = final_rows[0].get("therapy_types", "Providers") if final_rows else "Providers"
     print("=======================================================")
     print("      PULL REQUEST VALIDATION REPORT (COPY BELOW)      ")
     print("=======================================================\n")
     print("Source: NPPES NPI Registry API (https://npiregistry.cms.hhs.gov/api-page)")
-    print("Query/scope: Taxonomy 'Behavior Analyst', LA County (ZIP-filtered)")
+    print(f"Query/scope: Taxonomy '{taxonomy_label}', LA County (ZIP-filtered)")
     print(f"Fetched: {fetched_date}")
     print(
         f"Rows delivered: {len(final_rows)} (removed {in_file_dupes} in-file dupes, "
